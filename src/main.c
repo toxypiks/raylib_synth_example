@@ -47,6 +47,11 @@ const KeyboardKey MY_KEYS[] = {
 
 bool notes[ARRAY_LEN(MY_KEYS)];
 
+typedef struct Event {
+    bool start;
+    int semitone;
+} Event;
+
 int main(void)
 {
     InitWindow(800, 600, "synth");
@@ -59,11 +64,24 @@ int main(void)
 
     PlayAudioStream(synth);
 
+    Sound beat = LoadSound("plant-bomb.wav");
+    int bpm = 120;
+
+    float delta_beat = 60.0f/bpm;
+    float beat_time = 0.0f;
+
     SetTargetFPS(60);
 
     int frame_count = 0;
 
     while(!WindowShouldClose()) {
+        double a = fmod(beat_time, delta_beat);
+        beat_time += GetFrameTime();
+        double b = fmod(beat_time, delta_beat);
+
+        if(a > b) {
+            PlaySound(beat);
+        }
 
         BeginDrawing();
         ClearBackground(GetColor(0x181818FF));
