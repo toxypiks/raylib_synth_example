@@ -24,12 +24,12 @@ typedef struct Note {
     int frame_count;
 } Note;
 
-void note_update(Note *note, float *buffer, size_t size)
+void note_update(Note *note, float amp, float *buffer, size_t size)
 {
     for(int i = 0; i < size; i++)
     {
         float time = (float)note->frame_count/SAMPLE_RATE;
-        buffer[i] += (float)sin(2*M_PI*time*note->frequency);
+        buffer[i] += (float)sin(2*M_PI*time*note->frequency)*amp;
         note->frame_count += 1;
     }
 }
@@ -55,7 +55,8 @@ int main(void)
     Note* notes = NULL;
 
     arrpush(notes, note(0));
-    //arrpush(notes, note(4));
+    arrpush(notes, note(4));
+    arrpush(notes, note(7));
 
     SetTargetFPS(60);
 
@@ -73,7 +74,7 @@ int main(void)
 
             for(int i = 0; i < arrlen(notes); i++)
             {
-                note_update(&notes[i], buffer, ARRAY_LEN(buffer));
+                note_update(&notes[i], 1.0/arrlen(notes), buffer, ARRAY_LEN(buffer));
             }
 
             for(int i = 0; i < ARRAY_LEN(buffer); i++)
