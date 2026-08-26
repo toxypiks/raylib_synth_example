@@ -1,15 +1,18 @@
 #include <stdio.h>
 #include <raylib.h>
 #include <math.h>
-#include "stb_ds.h"
 
 #define ARRAY_LEN(arr) (sizeof(arr) / sizeof((arr)[0]))
+#define CLAMP(val, min, max) ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
 
 #define SAMPLE_RATE 44100
 #define SAMPLE_SIZE 32
 #define CHANNELS 1
 #define ROOT_NOOT 440.0
 #define NEXT_SEMITONE 1.0594630943592953f
+
+#define STB_DS_IMPLEMENTATION
+#include "stb_ds.h"
 
 float semitone_to_frequency(int semitone)
 {
@@ -20,6 +23,23 @@ typedef struct Note {
     float frequency;
     int frame_count;
 } Note;
+
+void note_update(Note *note, float *buffer, size_t size)
+{
+    for(int i = 0; i < size; i++)
+    {
+        float time = (float)note->frame_count/SAMPLE_RATE;
+        buffer[i] += (float)sin(2*M_PI*time*note->frequency);
+        note->frame_count += 1;
+    }
+}
+
+static inline Note note(float semitone) {
+    Note n;
+    n.frequency = semitone_to_frequency(semitone);
+    n.frame_count = 0;
+    return n;
+}
 
 int main(void)
 {
@@ -32,49 +52,42 @@ int main(void)
     AudioStream synth = LoadAudioStream(SAMPLE_RATE, SAMPLE_SIZE, CHANNELS);
 
     PlayAudioStream(synth);
-    SetTargetFPS(60);
-    int synth_frame_count = 0;
-    float synth_freq = 0.0f;
+    Note* notes = NULL;
 
-    float* dynamic_array = NULL;
+    arrpush(notes, note(0));
+    //arrpush(notes, note(4));
+
+    SetTargetFPS(60);
 
     while(!WindowShouldClose()) {
 
         BeginDrawing();
         ClearBackground(GetColor(0x181818AA));
-        if(IsKeyDown(KEY_Z)) {
-            synth_freq = semitone_to_frequency(0);
-        }
-        else {
-            synth_freq = 0.0f;
-        }
 
-        if(IsKeyDown(KEY_S)) {
-            synth_freq = semitone_to_frequency(1);
-        } else {
-            synth_freq = 0.0f;
-        }
-
-        if(IsKeyDown(KEY_X)) {
-            synth_freq = semitone_to_frequency(2);
-        } else {
-            synth_freq = 0.0f;
-        }
-
-        if (IsAudioStreamProcessed(synth))
+        while (IsAudioStreamProcessed(synth))
+        {
+            for(int i = 0; i < ARRAY_LEN(buffer); i++)
             {
-                for(int i = 0; i < ARRAY_LEN(buffer); ++i)
-                {
-                    float time = (float)synth_frame_count/SAMPLE_RATE;
-                    buffer[i] = sin(2*M_PI*time*synth_freq);
-                    synth_frame_count += 1;
-                }
-                UpdateAudioStream(synth, buffer, ARRAY_LEN(buffer));
+                buffer[i] = 0.0f;
             }
-            EndDrawing();
+
+            for(int i = 0; i < arrlen(notes); i++)
+            {
+                note_update(&notes[i], buffer, ARRAY_LEN(buffer));
+            }
+
+            for(int i = 0; i < ARRAY_LEN(buffer); i++)
+            {
+                buffer[i] = CLAMP(buffer[i], -1.0f, 1.0f);
+            }
+            UpdateAudioStream(synth, buffer, ARRAY_LEN(buffer));
         }
-        CloseWindow();
-        UnloadAudioStream(synth);
-        CloseAudioDevice();
-        return 0;
+        EndDrawing();
+    }
+
+    arrfree(notes);
+    CloseWindow();
+    UnloadAudioStream(synth);
+    CloseAudioDevice();
+    return 0;
 }
