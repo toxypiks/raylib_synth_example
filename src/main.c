@@ -38,11 +38,19 @@ void note_update(Note *note, float amp, float *buffer, size_t size)
 }
 
 const KeyboardKey MY_KEYS[] = {
-    KEY_Y,
+    KEY_Z,
     KEY_S,
     KEY_X,
     KEY_D,
-    KEY_C
+    KEY_C,
+    KEY_V,
+    KEY_G,
+    KEY_B,
+    KEY_H,
+    KEY_N,
+    KEY_J,
+    KEY_M,
+    KEY_COMMA
 };
 
 Note notes[ARRAY_LEN(MY_KEYS)];
@@ -68,16 +76,24 @@ int main(void)
 
     SetTargetFPS(60);
 
+    for (int i = 0; i < ARRAY_LEN(notes); i++) {
+        notes[i] = note(i);
+        notes[i].playing = false;
+    }
+
     while(!WindowShouldClose()) {
 
         BeginDrawing();
-        ClearBackground(GetColor(0x181818AA));
+        ClearBackground(GetColor(0x181818FF));
 
         int notes_playing = 0;
         for (int i = 0; i < ARRAY_LEN(notes); i++)
         {
+            if (IsKeyPressed(MY_KEYS[i])) {
+                notes[i].frame_count = 0;
+            }
             notes[i].playing = IsKeyDown(MY_KEYS[i]);
-            if(notes[i].playing) {
+            if (notes[i].playing) {
                 notes_playing += 1;
             }
         }
@@ -89,7 +105,7 @@ int main(void)
                 buffer[i] = 0.0f;
             }
             if (notes_playing > 0) {
-                for(int i = 0; i < arrlen(notes); i++)
+                for(int i = 0; i < ARRAY_LEN(notes); i++)
                 {
                     note_update(&notes[i], 1.0/notes_playing, buffer, ARRAY_LEN(buffer));
                 }
