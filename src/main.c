@@ -22,18 +22,15 @@ float semitone_to_frequency(int semitone)
 
 typedef struct Note {
     bool playing;
-    float frequency;
-    int frame_count;
 } Note;
 
-void note_update(Note *note, float amp, float *buffer, size_t size)
+void note_update(Note *note, int frame_count, float frequency, float amp, float *buffer, size_t size)
 {
     if(!note->playing)return;
     for(int i = 0; i < size; i++)
     {
-        float time = (float)note->frame_count/SAMPLE_RATE;
-        buffer[i] += (float)sin(2*M_PI*time*note->frequency)*amp;
-        note->frame_count += 1;
+        float time = (float)(frame_count+i)/SAMPLE_RATE;
+        buffer[i] += (float)sin(2*M_PI*time*frequency)*amp;
     }
 }
 
@@ -55,13 +52,6 @@ const KeyboardKey MY_KEYS[] = {
 
 Note notes[ARRAY_LEN(MY_KEYS)];
 
-static inline Note note(float semitone) {
-    Note n;
-    n.frequency = semitone_to_frequency(semitone);
-    n.frame_count = 0;
-    return n;
-}
-
 int main(void)
 {
     InitWindow(800, 600, "synth");
@@ -76,10 +66,7 @@ int main(void)
 
     SetTargetFPS(60);
 
-    for (int i = 0; i < ARRAY_LEN(notes); i++) {
-        notes[i] = note(i);
-        notes[i].playing = false;
-    }
+    int frame_count = 0;
 
     while(!WindowShouldClose()) {
 
@@ -89,9 +76,6 @@ int main(void)
         int notes_playing = 0;
         for (int i = 0; i < ARRAY_LEN(notes); i++)
         {
-            if (IsKeyPressed(MY_KEYS[i])) {
-                notes[i].frame_count = 0;
-            }
             notes[i].playing = IsKeyDown(MY_KEYS[i]);
             if (notes[i].playing) {
                 notes_playing += 1;
@@ -107,7 +91,7 @@ int main(void)
             if (notes_playing > 0) {
                 for(int i = 0; i < ARRAY_LEN(notes); i++)
                 {
-                    note_update(&notes[i], 1.0/notes_playing, buffer, ARRAY_LEN(buffer));
+                    note_update(&notes[i], frame_count, semitone_to_frequency(i), 1.0/notes_playing, buffer, ARRAY_LEN(buffer));
                 }
 
                 for(int i = 0; i < ARRAY_LEN(buffer); i++)
@@ -115,6 +99,7 @@ int main(void)
                     buffer[i] = CLAMP(buffer[i], -1.0f, 1.0f);
                 }
             }
+            frame_count += ARRAY_LEN(buffer);
             UpdateAudioStream(synth, buffer, ARRAY_LEN(buffer));
         }
         EndDrawing();
