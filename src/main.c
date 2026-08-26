@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdbool.h>
 #include <raylib.h>
 #include <math.h>
 
@@ -20,12 +21,14 @@ float semitone_to_frequency(int semitone)
 }
 
 typedef struct Note {
+    bool playing;
     float frequency;
     int frame_count;
 } Note;
 
 void note_update(Note *note, float amp, float *buffer, size_t size)
 {
+    if(!note->playing)return;
     for(int i = 0; i < size; i++)
     {
         float time = (float)note->frame_count/SAMPLE_RATE;
@@ -33,6 +36,16 @@ void note_update(Note *note, float amp, float *buffer, size_t size)
         note->frame_count += 1;
     }
 }
+
+const KeyboardKey MY_KEYS[] = {
+    KEY_Y,
+    KEY_S,
+    KEY_X,
+    KEY_D,
+    KEY_C
+};
+
+Note notes[ARRAY_LEN(MY_KEYS)];
 
 static inline Note note(float semitone) {
     Note n;
@@ -52,11 +65,6 @@ int main(void)
     AudioStream synth = LoadAudioStream(SAMPLE_RATE, SAMPLE_SIZE, CHANNELS);
 
     PlayAudioStream(synth);
-    Note* notes = NULL;
-
-    arrpush(notes, note(0));
-    arrpush(notes, note(4));
-    arrpush(notes, note(7));
 
     SetTargetFPS(60);
 
@@ -65,28 +73,37 @@ int main(void)
         BeginDrawing();
         ClearBackground(GetColor(0x181818AA));
 
+        int notes_playing = 0;
+        for (int i = 0; i < ARRAY_LEN(notes); i++)
+        {
+            notes[i].playing = IsKeyDown(MY_KEYS[i]);
+            if(notes[i].playing) {
+                notes_playing += 1;
+            }
+        }
+
         while (IsAudioStreamProcessed(synth))
         {
-            for(int i = 0; i < ARRAY_LEN(buffer); i++)
+            for (int i = 0; i < ARRAY_LEN(buffer); i++)
             {
                 buffer[i] = 0.0f;
             }
+            if (notes_playing > 0) {
+                for(int i = 0; i < arrlen(notes); i++)
+                {
+                    note_update(&notes[i], 1.0/notes_playing, buffer, ARRAY_LEN(buffer));
+                }
 
-            for(int i = 0; i < arrlen(notes); i++)
-            {
-                note_update(&notes[i], 1.0/arrlen(notes), buffer, ARRAY_LEN(buffer));
-            }
-
-            for(int i = 0; i < ARRAY_LEN(buffer); i++)
-            {
-                buffer[i] = CLAMP(buffer[i], -1.0f, 1.0f);
+                for(int i = 0; i < ARRAY_LEN(buffer); i++)
+                {
+                    buffer[i] = CLAMP(buffer[i], -1.0f, 1.0f);
+                }
             }
             UpdateAudioStream(synth, buffer, ARRAY_LEN(buffer));
         }
         EndDrawing();
     }
 
-    arrfree(notes);
     CloseWindow();
     UnloadAudioStream(synth);
     CloseAudioDevice();
