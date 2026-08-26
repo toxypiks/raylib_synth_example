@@ -20,13 +20,8 @@ float semitone_to_frequency(int semitone)
     return ROOT_NOOT*pow(NEXT_SEMITONE, semitone);
 }
 
-typedef struct Note {
-    bool playing;
-} Note;
-
-void note_update(Note *note, int frame_count, float frequency, float amp, float *buffer, size_t size)
+void note_update(int frame_count, float frequency, float amp, float *buffer, size_t size)
 {
-    if(!note->playing)return;
     for(int i = 0; i < size; i++)
     {
         float time = (float)(frame_count+i)/SAMPLE_RATE;
@@ -50,7 +45,7 @@ const KeyboardKey MY_KEYS[] = {
     KEY_COMMA
 };
 
-Note notes[ARRAY_LEN(MY_KEYS)];
+bool notes[ARRAY_LEN(MY_KEYS)];
 
 int main(void)
 {
@@ -76,8 +71,8 @@ int main(void)
         int notes_playing = 0;
         for (int i = 0; i < ARRAY_LEN(notes); i++)
         {
-            notes[i].playing = IsKeyDown(MY_KEYS[i]);
-            if (notes[i].playing) {
+            notes[i] = IsKeyDown(MY_KEYS[i]);
+            if (notes[i]) {
                 notes_playing += 1;
             }
         }
@@ -91,7 +86,9 @@ int main(void)
             if (notes_playing > 0) {
                 for(int i = 0; i < ARRAY_LEN(notes); i++)
                 {
-                    note_update(&notes[i], frame_count, semitone_to_frequency(i), 1.0/notes_playing, buffer, ARRAY_LEN(buffer));
+                    if(notes[i]) {
+                        note_update(frame_count, semitone_to_frequency(i), 1.0/notes_playing, buffer, ARRAY_LEN(buffer));
+                    }
                 }
 
                 for(int i = 0; i < ARRAY_LEN(buffer); i++)
