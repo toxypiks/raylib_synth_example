@@ -12,6 +12,13 @@
 #define ROOT_NOOT 440.0
 #define NEXT_SEMITONE 1.0594630943592953f
 
+#define BPM 120
+#define BEAT_SECS (60.0f / BPM)
+#define BAR_BEATS 4
+#define BAR_SECS (BAR_BEATS * BEAT_SECS)
+#define BAR_QUANT 32
+#define QUANT_SECS (BAR_SECS / BAR_QUANT)
+
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
 
@@ -47,7 +54,10 @@ const KeyboardKey MY_KEYS[] = {
 
 bool notes[ARRAY_LEN(MY_KEYS)];
 
+typedef int Quant;
+
 typedef struct Event {
+    Quant timestamp;
     bool start;
     int semitone;
 } Event;
@@ -56,6 +66,8 @@ int main(void)
 {
     InitWindow(800, 600, "synth");
     InitAudioDevice();
+    SetConfigFlags(FLAG_MSAA_4X_HINT);
+    SetConfigFlags(FLAG_WINDOW_RESIZABLE);
 
     float buffer[1024];
     SetAudioStreamBufferSizeDefault(ARRAY_LEN(buffer));
@@ -65,26 +77,20 @@ int main(void)
     PlayAudioStream(synth);
 
     Sound beat = LoadSound("plant-bomb.wav");
-    int bpm = 120;
 
-    float delta_beat = 60.0f/bpm;
     float beat_time = 0.0f;
-
     SetTargetFPS(60);
-
+    SetExitKey(KEY_NULL);
     int frame_count = 0;
+    bool recording = false;
 
     while(!WindowShouldClose()) {
-        double a = fmod(beat_time, delta_beat);
-        beat_time += GetFrameTime();
-        double b = fmod(beat_time, delta_beat);
+        int quant = (int)(GetTime()/QUANT_SECS);
 
-        if(a > b) {
-            PlaySound(beat);
+        if (IsKeyPressed(KEY_SPACE))
+        {
+            recording = !recording;
         }
-
-        BeginDrawing();
-        ClearBackground(GetColor(0x181818FF));
 
         int notes_playing = 0;
         for (int i = 0; i < ARRAY_LEN(notes); i++)
@@ -117,6 +123,22 @@ int main(void)
             frame_count += ARRAY_LEN(buffer);
             UpdateAudioStream(synth, buffer, ARRAY_LEN(buffer));
         }
+        BeginDrawing();
+        ClearBackground(GetColor(0x181818FF));
+        Vector2 center = {GetScreenWidth() - 75.0f, 75.0f};
+        float radius = 25.0f;
+        Color color = RED;
+        if (recording) {
+            DrawCircleV(center, radius, color);
+        } else {
+            DrawRing(center, radius*0.8, radius, 0.0f, 360.f, 100, color);
+        }
+        float beat_length = (float)GetScreenWidth()/BAR_BEATS;
+        for (int i = 1; i < BAR_BEATS; ++i) {
+            DrawLineV((Vector2){i*beat_length, 0},(Vector2){i*beat_length, (float)GetScreenHeight()}, GRAY);
+        }
+        double x = fmod(GetTime(), BAR_SECS)/BAR_SECS*GetScreenWidth();
+        DrawLineV((Vector2){(float)x, 0}, (Vector2){(float)x, GetScreenHeight()}, WHITE);
         EndDrawing();
     }
 
