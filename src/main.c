@@ -78,18 +78,45 @@ int main(void)
 
     Sound beat = LoadSound("plant-bomb.wav");
 
-    float beat_time = 0.0f;
     SetTargetFPS(60);
     SetExitKey(KEY_NULL);
+
     int frame_count = 0;
+    float beat_time = 0.0f;
     bool recording = false;
+
+    typedef enum STATE {
+        REPLAY,
+        WAITING_UNTIL_END_OF_BAR,
+        RECORD,
+    } STATE;
+
+    STATE current_state = REPLAY;
+
+    Event *events = NULL;
 
     while(!WindowShouldClose()) {
         int quant = (int)(GetTime()/QUANT_SECS);
 
+        double a = fmod(beat_time, BEAT_SECS);
+        beat_time += GetFrameTime();
+        double b = fmod(beat_time, BEAT_SECS);
+
+        if(a > b) {
+            PlaySound(beat);
+        }
+
         if (IsKeyPressed(KEY_SPACE))
         {
-            recording = !recording;
+            switch (current_state)
+            {
+                case REPLAY:
+                    current_state = WAITING_UNTIL_END_OF_BAR;
+                case WAITING_UNTIL_END_OF_BAR:
+                    current_state = REPLAY;
+                case RECORD:
+                    current_state = REPLAY;
+            }
         }
 
         int notes_playing = 0;
@@ -128,16 +155,20 @@ int main(void)
         Vector2 center = {GetScreenWidth() - 75.0f, 75.0f};
         float radius = 25.0f;
         Color color = RED;
-        if (recording) {
-            DrawCircleV(center, radius, color);
-        } else {
-            DrawRing(center, radius*0.8, radius, 0.0f, 360.f, 100, color);
+        switch (current_state)
+        {
+            case REPLAY:
+                DrawRing(center, radius*0.8, radius, 0.0f, 360.f, 100, WHITE);
+            case WAITING_UNTIL_END_OF_BAR:
+                DrawCircleV(center, radius, BLUE);
+            case RECORD:
+                DrawCircleV(center, radius, RED);
         }
         float beat_length = (float)GetScreenWidth()/BAR_BEATS;
         for (int i = 1; i < BAR_BEATS; ++i) {
             DrawLineV((Vector2){i*beat_length, 0},(Vector2){i*beat_length, (float)GetScreenHeight()}, GRAY);
         }
-        double x = fmod(GetTime(), BAR_SECS)/BAR_SECS*GetScreenWidth();
+        double x = fmod(beat_time, BAR_SECS)/BAR_SECS*GetScreenWidth();
         DrawLineV((Vector2){(float)x, 0}, (Vector2){(float)x, GetScreenHeight()}, WHITE);
         EndDrawing();
     }
