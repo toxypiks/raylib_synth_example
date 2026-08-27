@@ -96,7 +96,7 @@ int main(void)
     Event *events = NULL;
 
     while(!WindowShouldClose()) {
-        int quant = (int)(GetTime()/QUANT_SECS);
+        int quant = (int)(beat_time/QUANT_SECS);
 
         double beat_time_prev = beat_time;
         beat_time += GetFrameTime();
@@ -108,6 +108,8 @@ int main(void)
         if (current_state == WAITING_UNTIL_END_OF_BAR) {
             if (fmod(beat_time, BAR_SECS) < fmod(beat_time_prev, BAR_SECS)) {
                 current_state = RECORD;
+                beat_time = 0;
+                arrsetlen(events, 0);
             }
         }
 
@@ -117,10 +119,17 @@ int main(void)
                 case REPLAY:
                     current_state = WAITING_UNTIL_END_OF_BAR;
                     break;
-                case WAITING_UNTIL_END_OF_BAR:
+                case RECORD:
+                    for (int i = 0; i < arrlen(events); ++i) {
+                        printf("Event %d: Timestamp=%d, Start=%s, Semitone=%d\n",
+                        i,
+                        events[i].timestamp,
+                        events[i].start ? "true" : "false",
+                        events[i].semitone);
+                    }
                     current_state = REPLAY;
                     break;
-                case RECORD:
+                case WAITING_UNTIL_END_OF_BAR:
                     current_state = REPLAY;
                     break;
             }
@@ -129,10 +138,30 @@ int main(void)
         int notes_playing = 0;
         for (int i = 0; i < ARRAY_LEN(notes); i++)
         {
-            notes[i] = IsKeyDown(MY_KEYS[i]);
-            if (notes[i]) {
-                notes_playing += 1;
+            if (IsKeyDown(MY_KEYS[i])) {
+                if (!notes[i]) {
+                    notes[i] = true;
+                    if (current_state == RECORD) {
+                        arrput(events, ((Event){
+                            .timestamp = quant,
+                            .start = true,
+                            .semitone = i
+                        }));
+                    }
+                }
+            } else {
+                if (notes[i]) {
+                    notes[i] = false;
+                    if (current_state == RECORD) {
+                        arrput(events, ((Event){
+                            .timestamp = quant,
+                            .start = false,
+                            .semitone = i
+                        }));
+                    }
+                }
             }
+            if (notes[i]) {notes_playing += 1;}
         }
 
         while (IsAudioStreamProcessed(synth))
