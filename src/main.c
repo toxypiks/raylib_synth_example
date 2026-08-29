@@ -5,6 +5,7 @@
 
 #define ARRAY_LEN(arr) (sizeof(arr) / sizeof((arr)[0]))
 #define CLAMP(val, min, max) ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 #define SAMPLE_RATE 44100
 #define SAMPLE_SIZE 32
@@ -27,12 +28,6 @@ float semitone_to_frequency(int semitone)
     return ROOT_NOOT * pow(NEXT_SEMITONE, semitone);
 }
 
-float note_update(int frame_count, float frequency)
-{
-    float time = (float)frame_count/ SAMPLE_RATE;
-    return (float)sin(2 * M_PI * time * frequency);
-}
-
 const KeyboardKey MY_KEYS[] = {
     KEY_Z, KEY_S, KEY_X, KEY_D, KEY_C, KEY_V, KEY_G,
     KEY_B, KEY_H, KEY_N, KEY_J, KEY_M, KEY_COMMA
@@ -45,6 +40,16 @@ typedef struct Note {
 
 Note notes_replay[ARRAY_LEN(MY_KEYS)];
 Note notes_monitor[ARRAY_LEN(MY_KEYS)];
+
+const int ATTACK_FRAME = 10000;
+
+float note_update(Note *note, int frame_count, float frequency)
+{
+    // calc for how long the note has been playing: frame_count - note->frame_stamp
+    float volume = MIN((float)(frame_count - note->frame_stamp)/ATTACK_FRAME, 1.0f);
+    float time = (float)frame_count/ SAMPLE_RATE;
+    return (float)sin(2 * M_PI * time * frequency)*volume;
+}
 
 void note_play(Note *note, int frame_count)
 {
@@ -225,12 +230,12 @@ int main(void)
 
                     for (int note_idx = 0; note_idx < ARRAY_LEN(notes_monitor); ++note_idx) {
                         if (notes_monitor[note_idx].playing) {
-                            buffer[sample_idx] += note_update(frame_count, semitone_to_frequency(note_idx)) * amplitude;
+                            buffer[sample_idx] += note_update(&notes_monitor[note_idx], frame_count, semitone_to_frequency(note_idx)) * amplitude;
                         }
                     }
                     for (int note_idx = 0; note_idx < ARRAY_LEN(notes_replay); ++note_idx) {
                         if (notes_replay[note_idx].playing) {
-                            buffer[sample_idx] += note_update(frame_count, semitone_to_frequency(note_idx)) * amplitude;
+                            buffer[sample_idx] += note_update(&notes_replay[note_idx], frame_count, semitone_to_frequency(note_idx)) * amplitude;
                         }
                     }
                 }
