@@ -27,13 +27,10 @@ float semitone_to_frequency(int semitone)
     return ROOT_NOOT * pow(NEXT_SEMITONE, semitone);
 }
 
-void note_update(int frame_count, float frequency, float amp, float *buffer, size_t size)
+float note_update(int frame_count, float frequency)
 {
-    for(int i = 0; i < size; i++)
-    {
-        float time = (float)(frame_count + i) / SAMPLE_RATE;
-        buffer[i] += (float)sin(2 * M_PI * time * frequency) * amp;
-    }
+    float time = (float)frame_count/ SAMPLE_RATE;
+    return (float)sin(2 * M_PI * time * frequency);
 }
 
 const KeyboardKey MY_KEYS[] = {
@@ -185,32 +182,40 @@ int main(void)
 
         while (IsAudioStreamProcessed(synth))
         {
-            for (int i = 0; i < ARRAY_LEN(buffer); i++) {
-                buffer[i] = 0.0f;
-            }
+            for (int sample_idx = 0; sample_idx < ARRAY_LEN(buffer); ++sample_idx)
+            {
+                buffer[sample_idx] = 0.0f;
+                int notes_playing = 0;
 
-            int notes_playing = 0;
-            for (int i = 0; i < ARRAY_LEN(notes_monitor); ++i) {
-                if (notes_monitor[i] || notes_replay[i]) {
-                    notes_playing += 1;
-                }
-            }
-
-            if (notes_playing > 0) {
-                for(int i = 0; i < ARRAY_LEN(notes_monitor); i++)
-                {
-                    // plays notes from live typing or recording
-                    if (notes_monitor[i] || notes_replay[i]) {
-                        note_update(frame_count, semitone_to_frequency(i), 1.0f / notes_playing, buffer, ARRAY_LEN(buffer));
+                for (int note_idx = 0; note_idx < ARRAY_LEN(notes_monitor); ++note_idx) {
+                    if (notes_monitor[note_idx]) {
+                        notes_playing += 1;
                     }
                 }
-            }
 
-            for(int i = 0; i < ARRAY_LEN(buffer); i++) {
-                buffer[i] = CLAMP(buffer[i], -1.0f, 1.0f);
-            }
+                for (int note_idx = 0; note_idx < ARRAY_LEN(notes_replay); ++note_idx) {
+                    if (notes_replay[note_idx]) {
+                        notes_playing += 1;
+                    }
+                }
 
-            frame_count += ARRAY_LEN(buffer);
+                if (notes_playing > 0) {
+                    float amplitude = 1.0f / notes_playing;
+
+                    for (int note_idx = 0; note_idx < ARRAY_LEN(notes_monitor); ++note_idx) {
+                        if (notes_monitor[note_idx]) {
+                            buffer[sample_idx] += note_update(frame_count, semitone_to_frequency(note_idx)) * amplitude;
+                        }
+                    }
+                    for (int note_idx = 0; note_idx < ARRAY_LEN(notes_replay); ++note_idx) {
+                        if (notes_replay[note_idx]) {
+                            buffer[sample_idx] += note_update(frame_count, semitone_to_frequency(note_idx)) * amplitude;
+                        }
+                    }
+                }
+                buffer[sample_idx] = CLAMP(buffer[sample_idx], -1.0f, 1.0f);
+                frame_count += 1;
+            }
             UpdateAudioStream(synth, buffer, ARRAY_LEN(buffer));
         }
 
