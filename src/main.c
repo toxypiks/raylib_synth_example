@@ -38,8 +38,24 @@ const KeyboardKey MY_KEYS[] = {
     KEY_B, KEY_H, KEY_N, KEY_J, KEY_M, KEY_COMMA
 };
 
-bool notes_replay[ARRAY_LEN(MY_KEYS)];
-bool notes_monitor[ARRAY_LEN(MY_KEYS)];
+typedef struct Note {
+    bool playing;
+    int frame_stamp;
+} Note;
+
+Note notes_replay[ARRAY_LEN(MY_KEYS)];
+Note notes_monitor[ARRAY_LEN(MY_KEYS)];
+
+void note_play(Note *note, int frame_count)
+{
+    note->playing = true;
+    note->frame_stamp = frame_count;
+}
+
+void note_stop(Note *note)
+{
+    note->playing = false;
+}
 
 typedef int Quant;
 
@@ -100,7 +116,12 @@ int main(void)
 
                     for (int i = 0; i < arrlen(events); ++i) {
                         if (events[i].timestamp == quant_we_have_to_play) {
-                            notes_replay[events[i].semitone] = events[i].start;
+                            if (events[i].start) {
+                                note_play(&notes_replay[events[i].semitone], frame_count);
+                            }
+                            else {
+                                note_stop(&notes_replay[events[i].semitone]);
+                            }
                         }
                     }
                 }
@@ -112,7 +133,7 @@ int main(void)
                     beat_time = 0.0f;
                     quant = 0;
                     for (int i = 0; i < ARRAY_LEN(notes_monitor); ++i) {
-                        if (notes_monitor[i]) {
+                        if (notes_monitor[i].playing) {
                             arrput(events, ((Event){
                                 .timestamp = quant,
                                 .start = true,
@@ -134,7 +155,7 @@ int main(void)
                     current_state = WAITING_UNTIL_END_OF_BAR;
                     arrsetlen(events, 0);
                     for (int i = 0; i < ARRAY_LEN(notes_replay); ++i) {
-                        notes_replay[i] = false;
+                        note_stop(&notes_replay[i]);
                     }
                     break;
                 case RECORD:
@@ -156,8 +177,8 @@ int main(void)
         for (int i = 0; i < ARRAY_LEN(notes_monitor); i++)
         {
             if (IsKeyDown(MY_KEYS[i])) {
-                if (!notes_monitor[i]) {
-                    notes_monitor[i] = true;
+                if (!notes_monitor[i].playing) {
+                    note_play(&notes_monitor[i], frame_count);
                     if (current_state == RECORD) {
                         arrput(events, ((Event){
                             .timestamp = quant,
@@ -167,8 +188,8 @@ int main(void)
                     }
                 }
             } else {
-                if (notes_monitor[i]) {
-                    notes_monitor[i] = false;
+                if (notes_monitor[i].playing) {
+                    note_stop(&notes_monitor[i]);
                     if (current_state == RECORD) {
                         arrput(events, ((Event){
                             .timestamp = quant,
@@ -188,13 +209,13 @@ int main(void)
                 int notes_playing = 0;
 
                 for (int note_idx = 0; note_idx < ARRAY_LEN(notes_monitor); ++note_idx) {
-                    if (notes_monitor[note_idx]) {
+                    if (notes_monitor[note_idx].playing) {
                         notes_playing += 1;
                     }
                 }
 
                 for (int note_idx = 0; note_idx < ARRAY_LEN(notes_replay); ++note_idx) {
-                    if (notes_replay[note_idx]) {
+                    if (notes_replay[note_idx].playing) {
                         notes_playing += 1;
                     }
                 }
@@ -203,12 +224,12 @@ int main(void)
                     float amplitude = 1.0f / notes_playing;
 
                     for (int note_idx = 0; note_idx < ARRAY_LEN(notes_monitor); ++note_idx) {
-                        if (notes_monitor[note_idx]) {
+                        if (notes_monitor[note_idx].playing) {
                             buffer[sample_idx] += note_update(frame_count, semitone_to_frequency(note_idx)) * amplitude;
                         }
                     }
                     for (int note_idx = 0; note_idx < ARRAY_LEN(notes_replay); ++note_idx) {
-                        if (notes_replay[note_idx]) {
+                        if (notes_replay[note_idx].playing) {
                             buffer[sample_idx] += note_update(frame_count, semitone_to_frequency(note_idx)) * amplitude;
                         }
                     }
