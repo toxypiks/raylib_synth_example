@@ -38,28 +38,42 @@ typedef struct Note {
     int frame_stamp;
 } Note;
 
+typedef struct NoteReleased {
+    int frame_stamp;
+    float frequency;
+    float volume;
+} NoteReleased;
+
 Note notes_replay[ARRAY_LEN(MY_KEYS)];
 Note notes_monitor[ARRAY_LEN(MY_KEYS)];
+NoteReleased *notes_released = NULL;
 
 const int ATTACK_FRAME = 10000;
+const int RELEASE_FRAME = 10000;
 
 float note_update(Note *note, int frame_count, float frequency)
 {
     // calc for how long the note has been playing: frame_count - note->frame_stamp
+    // the longer the note has been played the louder it gets with limit 1.0
     float volume = MIN((float)(frame_count - note->frame_stamp)/ATTACK_FRAME, 1.0f);
     float time = (float)frame_count/ SAMPLE_RATE;
     return (float)sin(2 * M_PI * time * frequency)*volume;
 }
 
-void note_play(Note *note, int frame_count)
+void note_press(Note *note, int frame_count)
 {
     note->playing = true;
     note->frame_stamp = frame_count;
 }
 
-void note_stop(Note *note)
+void note_release(Note *note, float frequency, int frame_count)
 {
-    note->playing = false;
+    if (note->playing) {
+        note->playing = false;
+        float volume = MIN((float)(frame_count - note->frame_stamp)/ATTACK_FRAME, 1.0f);
+        NoteReleased note_released = {.frame_stamp = frame_count, .frequency = frequency, .volume = volume};
+        arrput(notes_released, note_released);
+    }
 }
 
 typedef int Quant;
@@ -122,10 +136,10 @@ int main(void)
                     for (int i = 0; i < arrlen(events); ++i) {
                         if (events[i].timestamp == quant_we_have_to_play) {
                             if (events[i].start) {
-                                note_play(&notes_replay[events[i].semitone], frame_count);
+                                note_press(&notes_replay[events[i].semitone], frame_count);
                             }
                             else {
-                                note_stop(&notes_replay[events[i].semitone]);
+                                note_release(&notes_replay[events[i].semitone], semitone_to_frequency(events[i].semitone), frame_count);
                             }
                         }
                     }
@@ -160,7 +174,7 @@ int main(void)
                     current_state = WAITING_UNTIL_END_OF_BAR;
                     arrsetlen(events, 0);
                     for (int i = 0; i < ARRAY_LEN(notes_replay); ++i) {
-                        note_stop(&notes_replay[i]);
+                        note_release(&notes_replay[i], semitone_to_frequency(i), frame_count);
                     }
                     break;
                 case RECORD:
@@ -183,7 +197,7 @@ int main(void)
         {
             if (IsKeyDown(MY_KEYS[i])) {
                 if (!notes_monitor[i].playing) {
-                    note_play(&notes_monitor[i], frame_count);
+                    note_press(&notes_monitor[i], frame_count);
                     if (current_state == RECORD) {
                         arrput(events, ((Event){
                             .timestamp = quant,
@@ -194,7 +208,7 @@ int main(void)
                 }
             } else {
                 if (notes_monitor[i].playing) {
-                    note_stop(&notes_monitor[i]);
+                    note_release(&notes_monitor[i], semitone_to_frequency(i),frame_count);
                     if (current_state == RECORD) {
                         arrput(events, ((Event){
                             .timestamp = quant,
