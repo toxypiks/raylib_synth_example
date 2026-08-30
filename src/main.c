@@ -48,8 +48,21 @@ Note notes_replay[ARRAY_LEN(MY_KEYS)];
 Note notes_monitor[ARRAY_LEN(MY_KEYS)];
 NoteReleased *notes_released = NULL;
 
-const int ATTACK_FRAME = 10000;
 const int RELEASE_FRAME = 10000;
+
+float note_released_update(NoteReleased *note_released, int frame_count)
+{
+    float volume = (1 - MIN((float)(frame_count - note_released->frame_stamp)/RELEASE_FRAME, 1.0f))*note_released->volume;
+    float time = (float)frame_count/ SAMPLE_RATE;
+    return (float)sin(2 * M_PI * time * note_released->frequency)*volume;
+}
+
+bool note_released_done(NoteReleased *note_released, int frame_count)
+{
+    return frame_count - note_released->frame_stamp >= RELEASE_FRAME;
+}
+
+const int ATTACK_FRAME = 10000;
 
 float note_update(Note *note, int frame_count, float frequency)
 {
@@ -239,6 +252,16 @@ int main(void)
                     }
                 }
 
+                // O(1) delete element out of array when order of elements dont matter
+                for (int i = arrlen(notes_released) - 1; i >= 0; --i) {
+                    if (note_released_done(&notes_released[i], frame_count)) {
+                        notes_released[i] = arrlast(notes_released); // copy last element to index of released note
+                        arrpop(notes_released);                      // delete last element -> arraylen - 1
+                    } else {
+                        notes_playing += arrlen(notes_released);
+                    }
+                }
+
                 if (notes_playing > 0) {
                     float amplitude = 1.0f / notes_playing;
 
@@ -251,6 +274,9 @@ int main(void)
                         if (notes_replay[note_idx].playing) {
                             buffer[sample_idx] += note_update(&notes_replay[note_idx], frame_count, semitone_to_frequency(note_idx)) * amplitude;
                         }
+                    }
+                    for (int note_idx = 0; note_idx < arrlen(notes_released); ++note_idx) {
+                        buffer[sample_idx] += note_released_update(&notes_released[note_idx], frame_count) * amplitude;
                     }
                 }
                 buffer[sample_idx] = CLAMP(buffer[sample_idx], -1.0f, 1.0f);
