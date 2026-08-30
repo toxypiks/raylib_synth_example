@@ -6,6 +6,7 @@
 #define ARRAY_LEN(arr) (sizeof(arr) / sizeof((arr)[0]))
 #define CLAMP(val, min, max) ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define LERP(a, b, t) ((a) + (t) * ((b) - (a)))
 
 #define SAMPLE_RATE 44100
 #define SAMPLE_SIZE 32
@@ -33,15 +34,68 @@ const KeyboardKey MY_KEYS[] = {
     KEY_B, KEY_H, KEY_N, KEY_J, KEY_M, KEY_COMMA
 };
 
+typedef struct Instrument {
+    void *instrument_data; // generic pointer
+    float (*instrument)(float x, void *data); // pointer to function
+} Instrument;
+
 typedef struct Note {
     bool playing;
     int frame_stamp;
+    Instrument instrument;
 } Note;
+
+float function_sine(float x, void *data)
+{
+    return sinf(x* 2.0f * (float)M_PI);
+}
+
+Instrument instrument_sine = {
+    .instrument_data = NULL,
+    .instrument = function_sine
+};
+
+float function_square(float x, void *data)
+{
+    // p tetermines the size of the wave below zero
+    float *p = (float*)data;
+    float x_frac = fmodf(x, 1.0f); // values between 0.0f and 1.0f
+    if ( x_frac < *p) {return 1.0f;}
+    return -1.0f;
+}
+
+static float square_p = 0.5f;
+
+Instrument instrument_square = {
+    .instrument_data = &square_p,
+    .instrument = function_square
+};
+
+float function_sawtooth(float x, void *data)
+{
+    float *p = (float*)data;
+    float x_frac = fmodf(x, 1.0f);
+
+    // from -1.0f to 1.0f
+    if (x_frac <= *p) {
+        return LERP(-1.0f, 1.0f, x_frac / (*p));
+    }
+
+    // from 1.0f to -1.0f
+    return LERP(1.0f, -1.0f, (x_frac - *p) / (1.0f - *p));
+}
+
+// call instrument function with instrument data as parameter
+float instrument_run(Instrument *instrument, float x)
+{
+    return instrument->instrument(x, instrument->instrument_data);
+}
 
 typedef struct NoteReleased {
     int frame_stamp;
     float frequency;
     float volume;
+    Instrument instrument;
 } NoteReleased;
 
 Note notes_replay[ARRAY_LEN(MY_KEYS)];
