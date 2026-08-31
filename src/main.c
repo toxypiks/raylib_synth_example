@@ -64,7 +64,7 @@ double function_square(double x, void *data)
     return -1.0f;
 }
 
-static float square_p = 0.5f;
+static double square_p = 0.5f;
 
 Instrument instrument_square = {
     .instrument_data = &square_p,
