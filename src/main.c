@@ -24,7 +24,7 @@
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
 
-float semitone_to_frequency(int semitone)
+double semitone_to_frequency(double semitone)
 {
     return ROOT_NOOT * pow(NEXT_SEMITONE, semitone);
 }
@@ -36,7 +36,7 @@ const KeyboardKey MY_KEYS[] = {
 
 typedef struct Instrument {
     void *instrument_data; // generic pointer
-    float (*instrument)(float x, void *data); // pointer to function
+    double (*instrument)(double x, void *data); // pointer to function
 } Instrument;
 
 typedef struct Note {
@@ -45,9 +45,9 @@ typedef struct Note {
     Instrument instrument;
 } Note;
 
-float function_sine(float x, void *data)
+double function_sine(double x, void *data)
 {
-    return sinf(x* 2.0f * (float)M_PI);
+    return sin(x* 2.0f * (double)M_PI);
 }
 
 Instrument instrument_sine = {
@@ -55,11 +55,11 @@ Instrument instrument_sine = {
     .instrument = function_sine
 };
 
-float function_square(float x, void *data)
+double function_square(double x, void *data)
 {
     // p tetermines the size of the wave below zero
-    float *p = (float*)data;
-    float x_frac = fmodf(x, 1.0f); // values between 0.0f and 1.0f
+    double *p = (double*)data;
+    double x_frac = fmod(x, 1.0f); // values between 0.0f and 1.0f
     if ( x_frac < *p) {return 1.0f;}
     return -1.0f;
 }
@@ -71,10 +71,10 @@ Instrument instrument_square = {
     .instrument = function_square
 };
 
-float function_sawtooth(float x, void *data)
+double function_sawtooth(double x, void *data)
 {
-    float *p = (float*)data;
-    float x_frac = fmodf(x, 1.0f);
+    double *p = (double*)data;
+    double x_frac = fmod(x, 1.0f);
 
     // from -1.0f to 1.0f
     if (x_frac <= *p) {
@@ -86,7 +86,7 @@ float function_sawtooth(float x, void *data)
 }
 
 // call instrument function with instrument data as parameter
-float instrument_run(Instrument *instrument, float x)
+float instrument_run(Instrument *instrument, double x)
 {
     return instrument->instrument(x, instrument->instrument_data);
 }
@@ -102,13 +102,15 @@ Note notes_replay[ARRAY_LEN(MY_KEYS)];
 Note notes_monitor[ARRAY_LEN(MY_KEYS)];
 NoteReleased *notes_released = NULL;
 
+
+
 const int RELEASE_FRAME = 10000;
 
 float note_released_update(NoteReleased *note_released, int frame_count)
 {
     float volume = (1 - MIN((float)(frame_count - note_released->frame_stamp)/RELEASE_FRAME, 1.0f))*note_released->volume;
     float time = (float)frame_count/ SAMPLE_RATE;
-    return (float)sin(2 * M_PI * time * note_released->frequency)*volume;
+    return instrument_run(&note_released->instrument, time*note_released->frequency)*volume;
 }
 
 bool note_released_done(NoteReleased *note_released, int frame_count)
@@ -124,13 +126,14 @@ float note_update(Note *note, int frame_count, float frequency)
     // the longer the note has been played the louder it gets with limit 1.0
     float volume = MIN((float)(frame_count - note->frame_stamp)/ATTACK_FRAME, 1.0f);
     float time = (float)frame_count/ SAMPLE_RATE;
-    return (float)sin(2 * M_PI * time * frequency)*volume;
+    return instrument_run(&note->instrument, time*frequency)*volume;
 }
 
-void note_press(Note *note, int frame_count)
+void note_press(Note *note, int frame_count, Instrument instrument)
 {
     note->playing = true;
     note->frame_stamp = frame_count;
+    note->instrument = instrument;
 }
 
 void note_release(Note *note, float frequency, int frame_count)
@@ -138,7 +141,7 @@ void note_release(Note *note, float frequency, int frame_count)
     if (note->playing) {
         note->playing = false;
         float volume = MIN((float)(frame_count - note->frame_stamp)/ATTACK_FRAME, 1.0f);
-        NoteReleased note_released = {.frame_stamp = frame_count, .frequency = frequency, .volume = volume};
+        NoteReleased note_released = {.frame_stamp = frame_count, .frequency = frequency, .volume = volume, .instrument = note->instrument};
         arrput(notes_released, note_released);
     }
 }
@@ -149,6 +152,7 @@ typedef struct Event {
     Quant timestamp;
     bool start;
     int semitone;
+    Instrument instrument;
 } Event;
 
 typedef enum STATE {
@@ -162,6 +166,11 @@ int main(void)
     InitWindow(800, 600, "synth");
     InitAudioDevice();
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
+
+    /*for (int i = 0; i < ARRAY_LEN(MY_KEYS); ++i) {
+        notes_monitor[i].instrument = instrument_sine;
+        notes_replay[i].instrument = instrument_sine;
+    }*/
 
     float buffer[1024];
     SetAudioStreamBufferSizeDefault(ARRAY_LEN(buffer));
@@ -179,6 +188,7 @@ int main(void)
     STATE current_state = REPLAY;
 
     Event *events = NULL;
+    Instrument instrument_current = instrument_sine;
 
     while (!WindowShouldClose()) {
         int quant = (int)(beat_time / QUANT_SECS);
@@ -203,7 +213,7 @@ int main(void)
                     for (int i = 0; i < arrlen(events); ++i) {
                         if (events[i].timestamp == quant_we_have_to_play) {
                             if (events[i].start) {
-                                note_press(&notes_replay[events[i].semitone], frame_count);
+                                note_press(&notes_replay[events[i].semitone], frame_count, instrument_current);
                             }
                             else {
                                 note_release(&notes_replay[events[i].semitone], semitone_to_frequency(events[i].semitone), frame_count);
@@ -223,7 +233,8 @@ int main(void)
                             arrput(events, ((Event){
                                 .timestamp = quant,
                                 .start = true,
-                                .semitone = i
+                                .semitone = i,
+                                .instrument = notes_monitor[i].instrument,
                             }));
                         }
                     }
@@ -264,12 +275,13 @@ int main(void)
         {
             if (IsKeyDown(MY_KEYS[i])) {
                 if (!notes_monitor[i].playing) {
-                    note_press(&notes_monitor[i], frame_count);
+                    note_press(&notes_monitor[i], frame_count, instrument_current);
                     if (current_state == RECORD) {
                         arrput(events, ((Event){
                             .timestamp = quant,
                             .start = true,
-                            .semitone = i
+                            .semitone = i,
+                            .instrument = instrument_current,
                         }));
                     }
                 }
@@ -280,7 +292,8 @@ int main(void)
                         arrput(events, ((Event){
                             .timestamp = quant,
                             .start = false,
-                            .semitone = i
+                            .semitone = i,
+                            .instrument = instrument_current,
                         }));
                     }
                 }
