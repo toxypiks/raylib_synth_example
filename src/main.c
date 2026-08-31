@@ -167,11 +167,6 @@ int main(void)
     InitAudioDevice();
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
 
-    /*for (int i = 0; i < ARRAY_LEN(MY_KEYS); ++i) {
-        notes_monitor[i].instrument = instrument_sine;
-        notes_replay[i].instrument = instrument_sine;
-    }*/
-
     float buffer[1024];
     SetAudioStreamBufferSizeDefault(ARRAY_LEN(buffer));
 
@@ -188,7 +183,7 @@ int main(void)
     STATE current_state = REPLAY;
 
     Event *events = NULL;
-    Instrument instrument_current = instrument_sine;
+    Instrument instrument_current = instrument_square;
 
     while (!WindowShouldClose()) {
         int quant = (int)(beat_time / QUANT_SECS);
