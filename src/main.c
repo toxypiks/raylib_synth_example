@@ -34,10 +34,20 @@ const KeyboardKey MY_KEYS[] = {
     KEY_B, KEY_H, KEY_N, KEY_J, KEY_M, KEY_COMMA
 };
 
-typedef struct Instrument {
-    void *instrument_data; // generic pointer
-    double (*instrument)(double x, void *data); // pointer to function
-} Instrument;
+typedef enum INSTRUMENT_TAG {
+    SINE,
+    SAWTOOTH,
+    SQUARE,
+    TREMOLO,
+} INSTRUMENT_TAG;
+
+typedef struct Instrument Instrument;
+
+struct Instrument {
+    INSTRUMENT_TAG tag;
+    double p;
+    Instrument *instrument;
+};
 
 typedef struct Note {
     bool playing;
@@ -45,50 +55,46 @@ typedef struct Note {
     Instrument instrument;
 } Note;
 
-double function_sine(double x, void *data)
+double instrument_run(Instrument *inst, double x)
 {
-    return sin(x* 2.0f * (double)M_PI);
-}
+    if (!inst) return 0.0;
 
-Instrument instrument_sine = {
-    .instrument_data = NULL,
-    .instrument = function_sine
-};
+    switch (inst->tag) {
+        case SINE:
+            return sin(x * 2.0 * M_PI);
 
-double function_square(double x, void *data)
-{
-    // p tetermines the size of the wave below zero
-    double *p = (double*)data;
-    double x_frac = fmod(x, 1.0f); // values between 0.0f and 1.0f
-    if ( x_frac < *p) {return 1.0f;}
-    return -1.0f;
-}
+        case SAWTOOTH: {
+            double x_frac = fmod(x, 1.0f);
 
-static double square_p = 0.5f;
+            // from -1.0f to 1.0f
+            if (x_frac <= inst->p) {
+                return LERP(-1.0f, 1.0f, x_frac / (inst->p));
+            }
 
-Instrument instrument_square = {
-    .instrument_data = &square_p,
-    .instrument = function_square
-};
+            // from 1.0f to -1.0f
+            return LERP(1.0f, -1.0f, (x_frac - inst->p) / (1.0f - inst->p));
+        }
 
-double function_sawtooth(double x, void *data)
-{
-    double *p = (double*)data;
-    double x_frac = fmod(x, 1.0f);
+        case SQUARE: {
+            double x_frac = fmod(x, 1.0);
+            if (x_frac < 0.0) x_frac += 1.0;
+            // inst->p equals Duty-Cycle (e.g 0.5)
+            double duty = (inst->p > 0.0) ? inst->p : 0.5;
+            return (x_frac < duty) ? 0.3 : -0.3;
+        }
 
-    // from -1.0f to 1.0f
-    if (x_frac <= *p) {
-        return LERP(-1.0f, 1.0f, x_frac / (*p));
+        case TREMOLO: {
+            // prevent endless recursion
+            if (!inst->instrument || inst->instrument == inst) return 0.0;
+
+            // inst->p tremolo speed
+            double LFO = (sin(x * inst->p * 2.0 * M_PI) + 1.0) * 0.5;
+
+            // recursive call of instrument with volume regulation
+            return instrument_run(inst->instrument, x) * LFO;
+        }
     }
-
-    // from 1.0f to -1.0f
-    return LERP(1.0f, -1.0f, (x_frac - *p) / (1.0f - *p));
-}
-
-// call instrument function with instrument data as parameter
-float instrument_run(Instrument *instrument, double x)
-{
-    return instrument->instrument(x, instrument->instrument_data);
+    return 0.0;
 }
 
 typedef struct NoteReleased {
@@ -101,8 +107,6 @@ typedef struct NoteReleased {
 Note notes_replay[ARRAY_LEN(MY_KEYS)];
 Note notes_monitor[ARRAY_LEN(MY_KEYS)];
 NoteReleased *notes_released = NULL;
-
-
 
 const int RELEASE_FRAME = 10000;
 
@@ -183,7 +187,7 @@ int main(void)
     STATE current_state = REPLAY;
 
     Event *events = NULL;
-    Instrument instrument_current = instrument_square;
+    Instrument instrument_current = {.tag = SINE};
 
     while (!WindowShouldClose()) {
         int quant = (int)(beat_time / QUANT_SECS);
