@@ -318,13 +318,13 @@ int main(void)
                     }
                 }
 
-                // O(1) delete element out of array when order of elements dont matter
+                notes_playing += arrlen(notes_released);
+
                 for (int i = arrlen(notes_released) - 1; i >= 0; --i) {
                     if (note_released_done(&notes_released[i], frame_count)) {
-                        notes_released[i] = arrlast(notes_released); // copy last element to index of released note
-                        arrpop(notes_released);                      // delete last element -> arraylen - 1
-                    } else {
-                        notes_playing += arrlen(notes_released);
+                        notes_released[i] = arrlast(notes_released);
+                        arrpop(notes_released);
+                        notes_playing -= 1;
                     }
                 }
 
