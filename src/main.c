@@ -156,7 +156,6 @@ typedef struct Event {
     Quant timestamp;
     bool start;
     int semitone;
-    Instrument instrument;
 } Event;
 
 typedef enum STATE {
@@ -187,7 +186,7 @@ int main(void)
     STATE current_state = REPLAY;
 
     Event *events = NULL;
-    Instrument instrument_current = {.tag = SINE};
+    Instrument instrument_current = {.tag = SQUARE};
 
     while (!WindowShouldClose()) {
         int quant = (int)(beat_time / QUANT_SECS);
@@ -233,7 +232,6 @@ int main(void)
                                 .timestamp = quant,
                                 .start = true,
                                 .semitone = i,
-                                .instrument = notes_monitor[i].instrument,
                             }));
                         }
                     }
@@ -280,7 +278,6 @@ int main(void)
                             .timestamp = quant,
                             .start = true,
                             .semitone = i,
-                            .instrument = instrument_current,
                         }));
                     }
                 }
@@ -292,7 +289,6 @@ int main(void)
                             .timestamp = quant,
                             .start = false,
                             .semitone = i,
-                            .instrument = instrument_current,
                         }));
                     }
                 }
