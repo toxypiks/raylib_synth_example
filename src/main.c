@@ -83,6 +83,10 @@ double instrument_tremolo_run(Instrument *this, double x) {
     return this->applied_to->run(this->applied_to, x) * volume;
 }
 
+Instrument my_sine = {
+    .run = instrument_sine_run
+};
+
 // example instruments
 Instrument my_square = {
     .run = instrument_square_run,
@@ -92,7 +96,7 @@ Instrument my_square = {
 Instrument my_tremolo = {
     .run = instrument_tremolo_run,
     .tremolo_frequency = 5.0, // 5 Hz Tremolo
-    .applied_to = &my_square
+    .applied_to = &my_sine
 };
 
 typedef struct NoteReleased {
@@ -208,10 +212,12 @@ int main(void)
     Event *events = NULL;
 
     // initialize instrument with pointer to function
-    Instrument instrument_current = {
+    /*Instrument instrument_current = {
         .run = instrument_sawtooth_run,
         .p = 0.5
     };
+    */
+    Instrument instrument_current = my_tremolo;
 
     while (!WindowShouldClose()) {
         int quant = (int)(beat_time / QUANT_SECS);
