@@ -34,19 +34,16 @@ const KeyboardKey MY_KEYS[] = {
     KEY_B, KEY_H, KEY_N, KEY_J, KEY_M, KEY_COMMA
 };
 
-typedef enum INSTRUMENT_TAG {
-    SINE,
-    SAWTOOTH,
-    SQUARE,
-    TREMOLO,
-} INSTRUMENT_TAG;
-
 typedef struct Instrument Instrument;
 
+// function pointer type definition
+typedef double (*InstrumentRunFunc)(Instrument *this, double x);
+
 struct Instrument {
-    INSTRUMENT_TAG tag;
+    InstrumentRunFunc run;
     double p;
-    Instrument *instrument;
+    double tremolo_frequency;
+    Instrument *applied_to;
 };
 
 typedef struct Note {
@@ -55,45 +52,53 @@ typedef struct Note {
     Instrument instrument;
 } Note;
 
-double instrument_run(Instrument *inst, double x)
-{
-    if (!inst) return 0.0;
+// wave forms and modulation
 
-    switch (inst->tag) {
-        case SINE:
-            return sin(x * 2.0 * M_PI);
-
-        case SAWTOOTH: {
-            double x_frac = fmod(x, 1.0);
-            if (x_frac < 0.0) x_frac += 1.0;
-            double p = (inst->p > 0.001 && inst->p < 0.999) ? inst->p : 0.5;
-
-            if (x_frac <= p) {
-                return LERP(-1.0f, 1.0f, x_frac / p);
-            }
-            return LERP(1.0f, -1.0f, (x_frac - p) / (1.0f - p));
-        }
-
-        case SQUARE: {
-            double x_frac = fmod(x, 1.0);
-            if (x_frac < 0.0) x_frac += 1.0;
-            double duty = (inst->p > 0.0) ? inst->p : 0.5;
-            return (x_frac < duty) ? 0.3 : -0.3;
-        }
-
-        case TREMOLO: {
-            if (!inst->instrument || inst->instrument == inst) return 0.0;
-            double LFO = (sin(x * inst->p * 2.0 * M_PI) + 1.0) * 0.5;
-            return instrument_run(inst->instrument, x) * LFO;
-        }
-    }
-    return 0.0;
+double instrument_sine_run(Instrument *this, double x) {
+    return sin(x * 2.0 * M_PI);
 }
+
+double instrument_square_run(Instrument *this, double x) {
+    double x_frac = fmod(x, 1.0);
+    if (x_frac < 0.0) x_frac += 1.0;
+    double duty = (this->p > 0.0) ? this->p : 0.5;
+    return (x_frac < duty) ? 0.3 : -0.3;
+}
+
+double instrument_sawtooth_run(Instrument *this, double x) {
+    double x_frac = fmod(x, 1.0);
+    if (x_frac < 0.0) x_frac += 1.0;
+    double p = (this->p > 0.001 && this->p < 0.999) ? this->p : 0.5;
+
+    if (x_frac <= p) {
+        return LERP(-1.0f, 1.0f, x_frac / p);
+    }
+    return LERP(1.0f, -1.0f, (x_frac - p) / (1.0f - p));
+}
+
+double instrument_tremolo_run(Instrument *this, double x) {
+    if (!this->applied_to || this->applied_to == this) return 0.0;
+
+    double volume = (sin(x * this->tremolo_frequency * 2.0 * M_PI) + 1.0) * 0.5;
+    return this->applied_to->run(this->applied_to, x) * volume;
+}
+
+// example instruments
+Instrument my_square = {
+    .run = instrument_square_run,
+    .p = 0.5
+};
+
+Instrument my_tremolo = {
+    .run = instrument_tremolo_run,
+    .tremolo_frequency = 5.0, // 5 Hz Tremolo
+    .applied_to = &my_square
+};
 
 typedef struct NoteReleased {
     int frame_stamp;
     float frequency;
-    float start_volume; // keeps volume after release key
+    float start_volume;
     Instrument instrument;
 } NoteReleased;
 
@@ -110,7 +115,11 @@ float note_released_update(NoteReleased *note_released, int frame_count)
     float volume = (1.0f - CLAMP(progress, 0.0f, 1.0f)) * note_released->start_volume;
 
     float local_time = (float)(frame_count - note_released->frame_stamp) / SAMPLE_RATE;
-    return instrument_run(&note_released->instrument, local_time * note_released->frequency) * volume;
+
+    if (note_released->instrument.run) {
+        return note_released->instrument.run(&note_released->instrument, local_time * note_released->frequency) * volume;
+    }
+    return 0.0f;
 }
 
 bool note_released_done(NoteReleased *note_released, int frame_count)
@@ -124,7 +133,11 @@ float note_update(Note *note, int frame_count, float frequency)
     float volume = MIN((float)age / ATTACK_FRAME, 1.0f);
 
     float local_time = (float)age / SAMPLE_RATE;
-    return instrument_run(&note->instrument, local_time * frequency) * volume;
+
+    if (note->instrument.run) {
+        return note->instrument.run(&note->instrument, local_time * frequency) * volume;
+    }
+    return 0.0f;
 }
 
 void note_press(Note *note, int frame_count, Instrument instrument)
@@ -193,8 +206,12 @@ int main(void)
     STATE current_state = REPLAY;
 
     Event *events = NULL;
-    // Instrument instrument_current = {.tag = SAWTOOTH, .p = 0.5};
-    Instrument instrument_current = {.tag = SQUARE, .p = 0.25};
+
+    // initialize instrument with pointer to function
+    Instrument instrument_current = {
+        .run = instrument_sawtooth_run,
+        .p = 0.5
+    };
 
     while (!WindowShouldClose()) {
         int quant = (int)(beat_time / QUANT_SECS);
