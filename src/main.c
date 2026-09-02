@@ -136,7 +136,7 @@ const KeyboardKey MY_KEYS[] = {
 typedef struct Instrument Instrument;
 
 // function pointer type definition
-typedef double (*InstrumentRunFunc)(Instrument *this, double x);
+typedef double (*InstrumentRunFunc)(Instrument *this, double time, double frequency);
 
 struct Instrument {
     InstrumentRunFunc run;
@@ -153,12 +153,12 @@ typedef struct Note {
 
 // wave forms and modulation
 
-double instrument_sine_run(Instrument *this, double x) {
-    return sin(x * 2.0 * M_PI);
+double instrument_sine_run(Instrument *this, double time, double frequency) {
+    return sin(time * 2.0 * M_PI * frequency);
 }
 
-double instrument_square_run(Instrument *this, double x) {
-    double x_frac = fmod(x, 1.0);
+double instrument_square_run(Instrument *this, double time, double frequency) {
+    double x_frac = fmod(time*frequency, 1.0);
     if (x_frac < 0.0) x_frac += 1.0;
     double duty = (this->p > 0.0) ? this->p : 0.5;
     return (x_frac < duty) ? 0.3 : -0.3;
@@ -175,11 +175,11 @@ double instrument_sawtooth_run(Instrument *this, double x) {
     return LERP(1.0f, -1.0f, (x_frac - p) / (1.0f - p));
 }
 
-double instrument_tremolo_run(Instrument *this, double x) {
+double instrument_tremolo_run(Instrument *this, double time, double frequency) {
     if (!this->applied_to || this->applied_to == this) return 0.0;
 
-    double volume = (sin(x * 2.0 * M_PI/this->tremolo_frequency) + 1.0) * 0.5;
-    return this->applied_to->run(this->applied_to, x) * volume;
+    double volume = (sin(time * 2.0 * M_PI*this->tremolo_frequency) + 1)/2;
+    return this->applied_to->run(this->applied_to, time, frequency) * volume;
 }
 
 Instrument my_sine = {
@@ -194,7 +194,7 @@ Instrument my_square = {
 
 Instrument my_tremolo = {
     .run = instrument_tremolo_run,
-    .tremolo_frequency = 50.0, // Hz Tremolo
+    .tremolo_frequency = 1, // Hz Tremolo
     .applied_to = &my_sine
 };
 
@@ -222,7 +222,7 @@ float note_released_update(NoteReleased *note_released, int frame_count)
     float local_time = (float)(frame_count - note_released->note_frame_stamp) / SAMPLE_RATE;
 
     if (note_released->instrument.run) {
-        return note_released->instrument.run(&note_released->instrument, local_time * note_released->frequency) * volume;
+        return note_released->instrument.run(&note_released->instrument, local_time, note_released->frequency) * volume;
     }
     return 0.0f;
 }
@@ -258,7 +258,7 @@ float note_update(Note *note, int frame_count, float frequency)
     float local_time = (float)age / SAMPLE_RATE;
 
     if (note->instrument.run) {
-        return note->instrument.run(&note->instrument, local_time * frequency) * volume;
+        return note->instrument.run(&note->instrument, local_time, frequency) * volume;
     }
     return 0.0f;
 }
