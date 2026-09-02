@@ -64,33 +64,26 @@ double instrument_run(Instrument *inst, double x)
             return sin(x * 2.0 * M_PI);
 
         case SAWTOOTH: {
-            double x_frac = fmod(x, 1.0f);
+            double x_frac = fmod(x, 1.0);
+            if (x_frac < 0.0) x_frac += 1.0;
+            double p = (inst->p > 0.001 && inst->p < 0.999) ? inst->p : 0.5;
 
-            // from -1.0f to 1.0f
-            if (x_frac <= inst->p) {
-                return LERP(-1.0f, 1.0f, x_frac / (inst->p));
+            if (x_frac <= p) {
+                return LERP(-1.0f, 1.0f, x_frac / p);
             }
-
-            // from 1.0f to -1.0f
-            return LERP(1.0f, -1.0f, (x_frac - inst->p) / (1.0f - inst->p));
+            return LERP(1.0f, -1.0f, (x_frac - p) / (1.0f - p));
         }
 
         case SQUARE: {
             double x_frac = fmod(x, 1.0);
             if (x_frac < 0.0) x_frac += 1.0;
-            // inst->p equals Duty-Cycle (e.g 0.5)
             double duty = (inst->p > 0.0) ? inst->p : 0.5;
             return (x_frac < duty) ? 0.3 : -0.3;
         }
 
         case TREMOLO: {
-            // prevent endless recursion
             if (!inst->instrument || inst->instrument == inst) return 0.0;
-
-            // inst->p tremolo speed
             double LFO = (sin(x * inst->p * 2.0 * M_PI) + 1.0) * 0.5;
-
-            // recursive call of instrument with volume regulation
             return instrument_run(inst->instrument, x) * LFO;
         }
     }
@@ -100,7 +93,7 @@ double instrument_run(Instrument *inst, double x)
 typedef struct NoteReleased {
     int frame_stamp;
     float frequency;
-    float volume;
+    float start_volume; // keeps volume after release key
     Instrument instrument;
 } NoteReleased;
 
@@ -108,13 +101,16 @@ Note notes_replay[ARRAY_LEN(MY_KEYS)];
 Note notes_monitor[ARRAY_LEN(MY_KEYS)];
 NoteReleased *notes_released = NULL;
 
-const int RELEASE_FRAME = 10000;
+const int ATTACK_FRAME = 220;   // ~5ms Attack
+const int RELEASE_FRAME = 2200; // ~50ms Release
 
 float note_released_update(NoteReleased *note_released, int frame_count)
 {
-    float volume = (1 - MIN((float)(frame_count - note_released->frame_stamp)/RELEASE_FRAME, 1.0f))*note_released->volume;
-    float time = (float)frame_count/ SAMPLE_RATE;
-    return instrument_run(&note_released->instrument, time*note_released->frequency)*volume;
+    float progress = (float)(frame_count - note_released->frame_stamp) / RELEASE_FRAME;
+    float volume = (1.0f - CLAMP(progress, 0.0f, 1.0f)) * note_released->start_volume;
+
+    float local_time = (float)(frame_count - note_released->frame_stamp) / SAMPLE_RATE;
+    return instrument_run(&note_released->instrument, local_time * note_released->frequency) * volume;
 }
 
 bool note_released_done(NoteReleased *note_released, int frame_count)
@@ -122,15 +118,13 @@ bool note_released_done(NoteReleased *note_released, int frame_count)
     return frame_count - note_released->frame_stamp >= RELEASE_FRAME;
 }
 
-const int ATTACK_FRAME = 10000;
-
 float note_update(Note *note, int frame_count, float frequency)
 {
-    // calc for how long the note has been playing: frame_count - note->frame_stamp
-    // the longer the note has been played the louder it gets with limit 1.0
-    float volume = MIN((float)(frame_count - note->frame_stamp)/ATTACK_FRAME, 1.0f);
-    float time = (float)frame_count/ SAMPLE_RATE;
-    return instrument_run(&note->instrument, time*frequency)*volume;
+    int age = frame_count - note->frame_stamp;
+    float volume = MIN((float)age / ATTACK_FRAME, 1.0f);
+
+    float local_time = (float)age / SAMPLE_RATE;
+    return instrument_run(&note->instrument, local_time * frequency) * volume;
 }
 
 void note_press(Note *note, int frame_count, Instrument instrument)
@@ -144,10 +138,23 @@ void note_release(Note *note, float frequency, int frame_count)
 {
     if (note->playing) {
         note->playing = false;
-        float volume = MIN((float)(frame_count - note->frame_stamp)/ATTACK_FRAME, 1.0f);
-        NoteReleased note_released = {.frame_stamp = frame_count, .frequency = frequency, .volume = volume, .instrument = note->instrument};
+        int age = frame_count - note->frame_stamp;
+        float current_vol = MIN((float)age / ATTACK_FRAME, 1.0f);
+
+        NoteReleased note_released = {
+            .frame_stamp = frame_count,
+            .frequency = frequency,
+            .start_volume = current_vol,
+            .instrument = note->instrument
+        };
         arrput(notes_released, note_released);
     }
+}
+
+float soft_clip(float x) {
+    if (x > 1.0f) return 1.0f;
+    if (x < -1.0f) return -1.0f;
+    return x - (x * x * x) / 3.0f;
 }
 
 typedef int Quant;
@@ -186,7 +193,8 @@ int main(void)
     STATE current_state = REPLAY;
 
     Event *events = NULL;
-    Instrument instrument_current = {.tag = SQUARE};
+    // Instrument instrument_current = {.tag = SAWTOOTH, .p = 0.5};
+    Instrument instrument_current = {.tag = SQUARE, .p = 0.25};
 
     while (!WindowShouldClose()) {
         int quant = (int)(beat_time / QUANT_SECS);
@@ -194,12 +202,10 @@ int main(void)
         double beat_time_prev = beat_time;
         beat_time += GetFrameTime();
 
-        // metronome click
         if (fmod(beat_time, BEAT_SECS) < fmod(beat_time_prev, BEAT_SECS)) {
             PlaySound(beat);
         }
 
-        // state machine
         switch (current_state)
         {
             case REPLAY:
@@ -253,13 +259,6 @@ int main(void)
                     }
                     break;
                 case RECORD:
-                    for (int i = 0; i < arrlen(events); ++i) {
-                        printf("Event %d: Timestamp=%d, Start=%s, Semitone=%d\n",
-                            i,
-                            events[i].timestamp,
-                            events[i].start ? "true" : "false",
-                            events[i].semitone);
-                    }
                     current_state = REPLAY;
                     break;
                 case WAITING_UNTIL_END_OF_BAR:
@@ -283,7 +282,7 @@ int main(void)
                 }
             } else {
                 if (notes_monitor[i].playing) {
-                    note_release(&notes_monitor[i], semitone_to_frequency(i),frame_count);
+                    note_release(&notes_monitor[i], semitone_to_frequency(i), frame_count);
                     if (current_state == RECORD) {
                         arrput(events, ((Event){
                             .timestamp = quant,
@@ -299,54 +298,37 @@ int main(void)
         {
             for (int sample_idx = 0; sample_idx < ARRAY_LEN(buffer); ++sample_idx)
             {
-                buffer[sample_idx] = 0.0f;
-                int notes_playing = 0;
+                float mixed_sample = 0.0f;
 
+                // active notes
                 for (int note_idx = 0; note_idx < ARRAY_LEN(notes_monitor); ++note_idx) {
                     if (notes_monitor[note_idx].playing) {
-                        notes_playing += 1;
+                        mixed_sample += note_update(&notes_monitor[note_idx], frame_count, semitone_to_frequency(note_idx));
                     }
                 }
 
                 for (int note_idx = 0; note_idx < ARRAY_LEN(notes_replay); ++note_idx) {
                     if (notes_replay[note_idx].playing) {
-                        notes_playing += 1;
+                        mixed_sample += note_update(&notes_replay[note_idx], frame_count, semitone_to_frequency(note_idx));
                     }
                 }
 
-                notes_playing += arrlen(notes_released);
-
+                // released notes
                 for (int i = arrlen(notes_released) - 1; i >= 0; --i) {
+                    mixed_sample += note_released_update(&notes_released[i], frame_count);
                     if (note_released_done(&notes_released[i], frame_count)) {
                         notes_released[i] = arrlast(notes_released);
                         arrpop(notes_released);
-                        notes_playing -= 1;
                     }
                 }
 
-                if (notes_playing > 0) {
-                    float amplitude = 1.0f / notes_playing;
+                mixed_sample *= 0.25f;
+                buffer[sample_idx] = soft_clip(mixed_sample);
 
-                    for (int note_idx = 0; note_idx < ARRAY_LEN(notes_monitor); ++note_idx) {
-                        if (notes_monitor[note_idx].playing) {
-                            buffer[sample_idx] += note_update(&notes_monitor[note_idx], frame_count, semitone_to_frequency(note_idx)) * amplitude;
-                        }
-                    }
-                    for (int note_idx = 0; note_idx < ARRAY_LEN(notes_replay); ++note_idx) {
-                        if (notes_replay[note_idx].playing) {
-                            buffer[sample_idx] += note_update(&notes_replay[note_idx], frame_count, semitone_to_frequency(note_idx)) * amplitude;
-                        }
-                    }
-                    for (int note_idx = 0; note_idx < arrlen(notes_released); ++note_idx) {
-                        buffer[sample_idx] += note_released_update(&notes_released[note_idx], frame_count) * amplitude;
-                    }
-                }
-                buffer[sample_idx] = CLAMP(buffer[sample_idx], -1.0f, 1.0f);
                 frame_count += 1;
             }
             UpdateAudioStream(synth, buffer, ARRAY_LEN(buffer));
         }
-
 
         BeginDrawing();
             ClearBackground(GetColor(0x181818FF));
