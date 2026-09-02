@@ -203,7 +203,9 @@ int main(void)
         beat_time += GetFrameTime();
 
         if (fmod(beat_time, BEAT_SECS) < fmod(beat_time_prev, BEAT_SECS)) {
-            PlaySound(beat);
+            if (current_state == RECORD) {
+                PlaySound(beat);
+            }
         }
 
         switch (current_state)
