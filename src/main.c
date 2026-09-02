@@ -79,7 +79,7 @@ double instrument_sawtooth_run(Instrument *this, double x) {
 double instrument_tremolo_run(Instrument *this, double x) {
     if (!this->applied_to || this->applied_to == this) return 0.0;
 
-    double volume = (sin(x * this->tremolo_frequency * 2.0 * M_PI) + 1.0) * 0.5;
+    double volume = (sin(x * 2.0 * M_PI/this->tremolo_frequency) + 1.0) * 0.5;
     return this->applied_to->run(this->applied_to, x) * volume;
 }
 
@@ -95,12 +95,13 @@ Instrument my_square = {
 
 Instrument my_tremolo = {
     .run = instrument_tremolo_run,
-    .tremolo_frequency = 5.0, // 5 Hz Tremolo
+    .tremolo_frequency = 50.0, // Hz Tremolo
     .applied_to = &my_sine
 };
 
 typedef struct NoteReleased {
-    int frame_stamp;
+    int note_frame_stamp;
+    int release_frame_stamp;
     float frequency;
     float start_volume;
     Instrument instrument;
@@ -115,10 +116,11 @@ const int RELEASE_FRAME = 2200; // ~50ms Release
 
 float note_released_update(NoteReleased *note_released, int frame_count)
 {
-    float progress = (float)(frame_count - note_released->frame_stamp) / RELEASE_FRAME;
-    float volume = (1.0f - CLAMP(progress, 0.0f, 1.0f)) * note_released->start_volume;
+    // fade out based on time when released
+    float release_progress = (float)(frame_count - note_released->release_frame_stamp) / RELEASE_FRAME;
+    float volume = (1.0f - CLAMP(release_progress, 0.0f, 1.0f)) * note_released->start_volume;
 
-    float local_time = (float)(frame_count - note_released->frame_stamp) / SAMPLE_RATE;
+    float local_time = (float)(frame_count - note_released->note_frame_stamp) / SAMPLE_RATE;
 
     if (note_released->instrument.run) {
         return note_released->instrument.run(&note_released->instrument, local_time * note_released->frequency) * volume;
@@ -128,7 +130,25 @@ float note_released_update(NoteReleased *note_released, int frame_count)
 
 bool note_released_done(NoteReleased *note_released, int frame_count)
 {
-    return frame_count - note_released->frame_stamp >= RELEASE_FRAME;
+    return frame_count - note_released->release_frame_stamp >= RELEASE_FRAME;
+}
+
+void note_release(Note *note, float frequency, int frame_count)
+{
+    if (note->playing) {
+        note->playing = false;
+        int age = frame_count - note->frame_stamp;
+        float current_vol = MIN((float)age / ATTACK_FRAME, 1.0f);
+
+        NoteReleased note_released = {
+            .note_frame_stamp = note->frame_stamp,
+            .release_frame_stamp = frame_count,
+            .frequency = frequency,
+            .start_volume = current_vol,
+            .instrument = note->instrument
+        };
+        arrput(notes_released, note_released);
+    }
 }
 
 float note_update(Note *note, int frame_count, float frequency)
@@ -149,23 +169,6 @@ void note_press(Note *note, int frame_count, Instrument instrument)
     note->playing = true;
     note->frame_stamp = frame_count;
     note->instrument = instrument;
-}
-
-void note_release(Note *note, float frequency, int frame_count)
-{
-    if (note->playing) {
-        note->playing = false;
-        int age = frame_count - note->frame_stamp;
-        float current_vol = MIN((float)age / ATTACK_FRAME, 1.0f);
-
-        NoteReleased note_released = {
-            .frame_stamp = frame_count,
-            .frequency = frequency,
-            .start_volume = current_vol,
-            .instrument = note->instrument
-        };
-        arrput(notes_released, note_released);
-    }
 }
 
 float soft_clip(float x) {
@@ -194,7 +197,7 @@ int main(void)
     InitAudioDevice();
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
 
-    float buffer[1024];
+    float buffer[1024*2];
     SetAudioStreamBufferSizeDefault(ARRAY_LEN(buffer));
 
     AudioStream synth = LoadAudioStream(SAMPLE_RATE, SAMPLE_SIZE, CHANNELS);
@@ -217,7 +220,7 @@ int main(void)
         .p = 0.5
     };
     */
-    Instrument instrument_current = my_tremolo;
+    Instrument instrument_current = my_sine;
 
     while (!WindowShouldClose()) {
         int quant = (int)(beat_time / QUANT_SECS);
