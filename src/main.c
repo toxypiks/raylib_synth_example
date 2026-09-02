@@ -2,6 +2,9 @@
 #include <stdbool.h>
 #include <raylib.h>
 #include <math.h>
+#include <complex.h>
+#include <string.h>
+#include <assert.h>
 
 #define ARRAY_LEN(arr) (sizeof(arr) / sizeof((arr)[0]))
 #define CLAMP(val, min, max) ((val) < (min) ? (min) : ((val) > (max) ? (max) : (val)))
@@ -23,6 +26,104 @@
 
 #define STB_DS_IMPLEMENTATION
 #include "stb_ds.h"
+
+// fft settings
+#define N (1<<11) // 2048 samples
+
+float in_raw[N];
+float in_win[N];
+float complex out_raw[N];
+float out_log[N];
+float out_smooth[N];
+
+void fft_push(float frame) {
+    memmove(in_raw, in_raw + 1, (N - 1) * sizeof(in_raw[0]));
+    in_raw[N - 1] = frame;
+}
+
+void fft(float in[], size_t stride, float complex out[], size_t n) {
+    assert(n > 0);
+    if (n == 1) {
+        out[0] = in[0];
+        return;
+    }
+    fft(in, stride * 2, out, n / 2);
+    fft(in + stride, stride * 2, out + n / 2, n / 2);
+
+    for (size_t k = 0; k < n / 2; ++k) {
+        float t = (float)k / n;
+        float complex v = cexp(-2 * I * PI * t) * out[k + n / 2];
+        float complex e = out[k];
+        out[k]       = e + v;
+        out[k + n / 2] = e - v;
+    }
+}
+
+static inline float amp(float complex z) {
+    float a = crealf(z);
+    float b = cimagf(z);
+    return logf(a * a + b * b + 1e-6f);
+}
+
+size_t fft_analyze(float dt) {
+    // hann window
+    for (size_t i = 0; i < N; ++i) {
+        float t = (float)i / (N - 1);
+        float hann = 0.5f - 0.5f * cosf(2 * PI * t);
+        in_win[i] = in_raw[i] * hann;
+    }
+
+    fft(in_win, 1, out_raw, N);
+
+    // logarithmic scaling
+    float step = 1.06f;
+    float lowf = 1.0f;
+    size_t m = 0;
+    float max_amp = 1.0f;
+
+    for (float f = lowf; (size_t)f < N / 2; f = ceilf(f * step)) {
+        float f1 = ceilf(f * step);
+        float a = 0.0f;
+        for (size_t q = (size_t)f; q < N / 2 && q < (size_t)f1; ++q) {
+            float b = amp(out_raw[q]);
+            if (b > a) a = b;
+        }
+        if (max_amp < a) max_amp = a;
+        out_log[m++] = a;
+    }
+
+    // normalize and smooth out
+    for (size_t i = 0; i < m; ++i) {
+        out_log[i] /= max_amp;
+        float smoothness = 12.0f;
+        out_smooth[i] += (out_log[i] - out_smooth[i]) * smoothness * dt;
+    }
+
+    return m;
+}
+
+void fft_render(int w, int h, size_t m) {
+    float cell_width = (float)w / m;
+
+    for (size_t i = 0; i < m; ++i) {
+        float val = CLAMP(out_smooth[i], 0.0f, 1.0f);
+        float hue = (float)i / m * 360.0f;
+        Color color = ColorFromHSV(hue, 0.75f, 1.0f);
+
+        float bar_height = h * 0.4f * val; // bar height 40% of window height
+
+        Rectangle bar = {
+            .x = i * cell_width,
+            .y = h - bar_height,
+            .width = cell_width - 1.0f,
+            .height = bar_height
+        };
+
+        DrawRectangleRec(bar, color);
+    }
+}
+
+// synthesizer engine
 
 double semitone_to_frequency(double semitone)
 {
@@ -191,8 +292,7 @@ typedef enum STATE {
     RECORD,
 } STATE;
 
-int main(void)
-{
+int main(void) {
     InitWindow(800, 600, "synth");
     InitAudioDevice();
     SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_WINDOW_RESIZABLE);
@@ -322,9 +422,9 @@ int main(void)
             }
         }
 
-        while (IsAudioStreamProcessed(synth))
-        {
-            for (int sample_idx = 0; sample_idx < ARRAY_LEN(buffer); ++sample_idx)
+        // fill audio buffer
+        while (IsAudioStreamProcessed(synth)) {
+             for (int sample_idx = 0; sample_idx < ARRAY_LEN(buffer); ++sample_idx)
             {
                 float mixed_sample = 0.0f;
 
@@ -351,16 +451,21 @@ int main(void)
                 }
 
                 mixed_sample *= 0.25f;
-                buffer[sample_idx] = soft_clip(mixed_sample);
+                float final_sample = soft_clip(mixed_sample);
+                buffer[sample_idx] = final_sample;
+
+                fft_push(final_sample);
 
                 frame_count += 1;
             }
             UpdateAudioStream(synth, buffer, ARRAY_LEN(buffer));
         }
 
+        size_t m = fft_analyze(GetFrameTime());
+
         BeginDrawing();
-            ClearBackground(GetColor(0x181818FF));
-            Vector2 center = {GetScreenWidth() - 75.0f, 75.0f};
+        ClearBackground(GetColor(0x181818FF));
+         Vector2 center = {GetScreenWidth() - 75.0f, 75.0f};
             float radius = 25.0f;
 
             switch (current_state)
@@ -383,6 +488,9 @@ int main(void)
 
             double x = fmod(beat_time, BAR_SECS) / BAR_SECS * GetScreenWidth();
             DrawLineV((Vector2){(float)x, 0}, (Vector2){(float)x, (float)GetScreenHeight()}, WHITE);
+
+            fft_render(GetScreenWidth(), GetScreenHeight(), m);
+
         EndDrawing();
     }
 
