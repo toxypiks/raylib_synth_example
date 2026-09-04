@@ -119,7 +119,20 @@ void fft_render(int w, int h, size_t m) {
             .height = bar_height
         };
 
-        DrawRectangleRec(bar, color);
+        Vector2 startPos = {
+            i * cell_width + cell_width/2,
+            h - h*2/3*val,
+        };
+
+        Vector2 endPos = {
+            i * cell_width + cell_width/2,
+            h,
+        };
+
+        DrawLineEx(startPos, endPos, cell_width/2, color);
+        DrawCircleV(startPos, cell_width*2, color);
+
+        //DrawRectangleRec(bar, color);
     }
 }
 
@@ -194,7 +207,7 @@ Instrument my_square = {
 
 Instrument my_tremolo = {
     .run = instrument_tremolo_run,
-    .tremolo_frequency = 1, // Hz Tremolo
+    .tremolo_frequency = 4, // Hz Tremolo
     .applied_to = &my_sine
 };
 
